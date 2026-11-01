@@ -1,166 +1,47 @@
-const express=require("express");
-const http=require("http");
-const {Server}=require("socket.io");
-const crypto=require("crypto");
-
-const app=express(), server=http.createServer(app);
-const io=new Server(server,{cors:{origin:true},pingInterval:20000,pingTimeout:45000});
+const express=require("express"),http=require("http"),path=require("path");
+const app=express(),server=http.createServer(app),{Server}=require("socket.io");
+const io=new Server(server,{cors:{origin:"*"},pingInterval:10000,pingTimeout:20000});
+app.use(express.static(path.join(__dirname,"public")));app.get("/health",(_,res)=>res.json({ok:true}));
 const PORT=process.env.PORT||3000;
-app.use(express.static("public"));
-app.get("/health",(_,res)=>res.json({ok:true,rooms:rooms.size,uptime:Math.round(process.uptime())}));
-
-const W=1000,FLOOR=520,GRAVITY=0.72,MAX_HP=100;
-const CHARS={
-  modi:{name:"Modi",title:"The Campaigner",color:"#ef8b2c",skin:"#bd805c",speed:4.5,power:1,guard:1.1,super:"Jan Sabha"},
-  rahul:{name:"Rahul",title:"The Challenger",color:"#3284cb",skin:"#c98d6b",speed:5.2,power:.95,guard:1,super:"Yuva Charge"},
-  didi:{name:"Mamta",title:"Didi",color:"#39a7a1",skin:"#b8795c",speed:5.1,power:.9,guard:1.15,super:"Dharna Dash"},
-  trump:{name:"Trump",title:"The Deal Maker",color:"#c33b42",skin:"#efc19b",speed:4.1,power:1.15,guard:.9,super:"Big Deal"},
-  yogi:{name:"Yogi",title:"The Bulldozer",color:"#f3a52b",skin:"#a96f4f",speed:4.2,power:1.2,guard:1.1,super:"Bulldozer"},
-  nitin:{name:"Nitin Gadkari",title:"The Highway Boss",color:"#397d59",skin:"#b77f5c",speed:3.9,power:1.25,guard:1.1,super:"Expressway"},
-  putin:{name:"Putin",title:"The Strongman",color:"#607b9c",skin:"#e0b38e",speed:4.4,power:1.15,guard:1.2,super:"Kremlin Grip"},
-  xi:{name:"Xi Jinping",title:"The Chairman",color:"#bd3434",skin:"#e3b48c",speed:3.8,power:1.15,guard:1.3,super:"Red Wave"},
-  kim:{name:"Kim Jong Un",title:"The Rocket Man",color:"#252a32",skin:"#e0b18a",speed:4,power:1.1,guard:1,super:"Rocket Launch"},
-  speed:{name:"IShowSpeed",title:"The Streamer",color:"#e9df44",skin:"#965e43",speed:6.2,power:.85,guard:.8,super:"Siu Sprint"},
-  mbapu:{name:"Mbapu",title:"THE FINAL BOSS",color:"#a64ae0",skin:"#d6a17e",speed:4.8,power:1.55,guard:1.4,super:"Bapu's Wrath",boss:true}
+const roster=["Yogi","Modi","Putin","Trump","Nitin Gadkari","Mamta Banerjee","Rahul","Mbapu","IShowSpeed","Xi Jinping","Kim Jong Un"];
+const dialogue={
+"Yogi":{intro:["Gorakhpur se seedha arena tak!","Aaj faisla dangal mein hoga."],taunt:["Bulldozer nahi, footwork dekho!","Abhi toh trailer tha."],special:["Yeh hai asli power!"],win:["Vijay ka shankhnaad!"],lose:["Agli baar poori taiyari se."]},
+"Modi":{intro:["Mitron, taiyaar ho?","Aaj ka मुकाबला ऐतिहासिक hoga!"],taunt:["Ek aur kadam aage!","Yeh game ab badlega."],special:["Masterstroke!"],win:["Yeh jeet janata ko samarpit!"],lose:["Main phir lautunga."]},
+"Putin":{intro:["Let's see your strength.","The arena is mine."],taunt:["Is that all?","Stay focused."],special:["Full force!"],win:["Victory. As expected."],lose:["Interesting. Rematch."]},
+"Trump":{intro:["Nobody fights like me. Nobody!","This will be a tremendous fight."],taunt:["Very weak!","You're fired!"],special:["The biggest super move!"],win:["A tremendous victory!"],lose:["Fake result. I want a rematch."]},
+"Nitin Gadkari":{intro:["Ab speed aur strategy dono!","Road se ring tak, ready?"],taunt:["Overtake kar ke dikhao!","Abhi acceleration baaki hai."],special:["Expressway attack!"],win:["Superfast victory!"],lose:["Agli baar traffic clear hoga."]},
+"Mamta Banerjee":{intro:["Khela hobe!","Ami ready. Tumi ready?"],taunt:["Eto shohoj noy!","Abar dekha hobe!"],special:["Khela shuru!"],win:["Joy Bangla!"],lose:["Abar khela hobe."]},
+"Rahul":{intro:["Let's have a fair fight.","I'm ready to learn and fight."],taunt:["Come on, let's go!","That's not the whole story."],special:["Surprise move!"],win:["We did it!"],lose:["I will come back stronger."]},
+"Mbapu":{intro:["The boss has arrived.","You need more than courage."],taunt:["You cannot stop me.","Feel the power."],special:["BOSS MODE!"],win:["The arena belongs to me!"],lose:["Impossible... for now."]},
+"IShowSpeed":{intro:["SIIIIUUU! LET'S GOOOO!","CHAT, WATCH THIS!"],taunt:["YOU'RE TOO SLOW!","RONALDOOO!"],special:["MAXIMUM SPEED!"],win:["SIUUUUUU!"],lose:["BROOO! RUN IT BACK!"]},
+"Xi Jinping":{intro:["A measured move wins the match.","Let the contest begin."],taunt:["Patience is power.","Think before you strike."],special:["Strategic strike!"],win:["A calculated victory."],lose:["The strategy will be revised."]},
+"Kim Jong Un":{intro:["The supreme challenger enters.","Prepare for the big match."],taunt:["You underestimate me.","Observe this move."],special:["Rocket power!"],win:["A glorious victory!"],lose:["We demand a rematch."]}
 };
-const STAGES=["sansad","jantar","sadak"];
-const rooms=new Map(),socketRoom=new Map();
-const randCode=()=>crypto.randomBytes(3).toString("hex").toUpperCase();
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function makeFighter(id,slot,team,char,bot=false){
- const c=CHARS[char]||CHARS.modi;
- return {id,slot,team,char:CHARS[char]?char:"modi",bot,name:bot?"CPU":`Player ${slot+1}`,
- x:team===0?250+slot*40:750-slot*40,y:FLOOR,vy:0,hp:MAX_HP,energy:0,facing:team===0?1:-1,
- action:"idle",actionTime:0,cooldown:0,invuln:0,block:false,crouch:false,stun:0,grounded:true,
- wins:0,score:0,guarding:false};
-}
-function capacity(mode){return mode==="2v2"?4:2}
-function pub(room){
- return {code:room.code,mode:room.mode,status:room.status,stage:room.stage,round:room.round,winner:room.winner,
-  players:room.players.map(p=>({id:p.id,slot:p.slot,team:p.team,char:p.char,name:p.name,bot:p.bot,hp:p.hp,energy:p.energy,x:p.x,y:p.y,facing:p.facing,action:p.action,block:p.block,crouch:p.crouch,grounded:p.grounded,wins:p.wins})),
-  countdown:room.countdown,host:room.host};
-}
-function send(room){io.to(room.code).emit("state",pub(room))}
-function newRoom(code,mode,stage){return {code,mode,stage:STAGES.includes(stage)?stage:"sansad",status:"lobby",players:[],inputs:new Map(),round:1,winner:null,countdown:0,host:null,lastBroadcast:0};}
-function getRoom(s){return rooms.get(socketRoom.get(s.id))}
-function startRound(r){r.status="countdown";r.countdown=3;r.winner=null;r.players.forEach(p=>{p.hp=MAX_HP;p.energy=0;p.x=p.team===0?230+p.slot*38:770-p.slot*38;p.y=FLOOR;p.vy=0;p.action="idle";p.actionTime=0;p.cooldown=0;p.invuln=0;p.stun=0;p.block=false;p.crouch=false;});send(r)}
-function readyToStart(r){return r.players.length===capacity(r.mode)&&r.players.every(p=>p.ready||p.bot)}
-function finish(r){const alive=new Set(r.players.filter(p=>p.hp>0).map(p=>p.team));if(alive.size<=1){r.status="finished";r.winner=alive.size?[...alive][0]:null;r.players.forEach(p=>{if(p.team===r.winner)p.wins++});send(r)}}
-function attack(p,kind,r,now){
- if(p.cooldown>0||p.stun>0||p.hp<=0)return;
- const c=CHARS[p.char];let cost=0,range=kind==="super"?220:kind==="grab"?82:kind==="kick"?115:95;
- let damage=kind==="super"?31:kind==="grab"?16:kind==="kick"?13:9;
- if(kind==="super"){if(p.energy<100)return;cost=100;damage*=c.power}
- p.energy=Math.max(0,p.energy-cost);p.cooldown=kind==="super"?950:kind==="grab"?700:kind==="kick"?520:420;
- p.action=kind;p.actionTime=kind==="super"?550:260;
- const foes=r.players.filter(t=>t.team!==p.team&&t.hp>0&&!t.botSpectator);
- let target=foes.filter(t=>Math.abs(t.x-p.x)<range&&Math.abs(t.y-p.y)<95).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
- if(target){
-   let amount=damage*c.power;
-   if(target.block&&kind!=="grab"&&kind!=="super")amount*=.18;
-   if(target.block&&kind==="super")amount*=.55;
-   if(target.invuln>0)amount=0;
-   target.hp=clamp(target.hp-amount,0,MAX_HP);
-   target.energy=clamp(target.energy+Math.ceil(amount*.8),0,100);
-   target.stun=kind==="super"?30:kind==="grab"?20:10;
-   target.invuln=kind==="super"?22:10;
-   target.action="hit";target.actionTime=230;
-   target.x=clamp(target.x+p.facing*(kind==="super"?42:kind==="grab"?24:14),45,W-45);
-   p.energy=clamp(p.energy+(kind==="super"?0:kind==="grab"?12:9),0,100);
- }else p.energy=clamp(p.energy+5,0,100);
- finish(r);
-}
-function updateRoom(r,dt){
- if(r.status==="countdown"){r.countdown-=dt;if(r.countdown<=0)r.status="playing";return}
- if(r.status!=="playing")return;
- const now=Date.now();
- for(const p of r.players){
-  if(p.hp<=0)continue;
-  p.cooldown=Math.max(0,p.cooldown-dt*1000);p.actionTime=Math.max(0,p.actionTime-dt*1000);p.stun=Math.max(0,p.stun-dt*60);p.invuln=Math.max(0,p.invuln-dt*60);
-  if(p.actionTime===0&&["hit","punch","kick","grab","super"].includes(p.action))p.action="idle";
-  const input=r.inputs.get(p.id)||{};
-  let inp=input;
-  if(p.bot){
-   const foe=r.players.filter(t=>t.team!==p.team&&t.hp>0).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-   inp={left:foe&&foe.x<p.x-65,right:foe&&foe.x>p.x+65,block:foe&&Math.abs(foe.x-p.x)<110&&Math.random()<.035,
-    punch:foe&&Math.abs(foe.x-p.x)<100&&Math.random()<.12,kick:foe&&Math.abs(foe.x-p.x)<130&&Math.random()<.07,
-    jump:Math.random()<.008,super:p.energy>=100&&Math.random()<.025};
-  }
-  p.block=!!inp.block;p.crouch=!!inp.crouch;
-  if(p.stun<=0){
-   const dir=(inp.right?1:0)-(inp.left?1:0);
-   if(!p.block){p.x=clamp(p.x+dir*CHARS[p.char].speed*(p.crouch?.45:1),45,W-45)}
-   if(inp.jump&&p.grounded){p.vy=-13;p.grounded=false}
-   if(inp.punch)attack(p,"punch",r,now);
-   else if(inp.kick)attack(p,"kick",r,now);
-   else if(inp.grab)attack(p,"grab",r,now);
-   else if(inp.super)attack(p,"super",r,now);
-  }
-  p.vy+=GRAVITY;p.y+=p.vy;
-  if(p.y>=FLOOR){p.y=FLOOR;p.vy=0;p.grounded=true}
-  const nearest=r.players.filter(t=>t.team!==p.team&&t.hp>0).sort((a,b)=>Math.abs(a.x-p.x)-Math.abs(b.x-p.x))[0];
-  if(nearest)p.facing=nearest.x>=p.x?1:-1;
-  if(p.hp<=0)p.action="ko";
- }
- finish(r);
+const cap=m=>m==="2v2"?4:2,clean=s=>String(s||"").replace(/[^a-z0-9]/gi,"").slice(0,8).toUpperCase();
+function makePlayer(id,name,char,slot,mode){return{id,name,character:roster.includes(char)?char:"Yogi",team:mode==="2v2"?slot%2:slot,ready:false,x:slot%2===0?260:700,y:0,vx:0,vy:0,hp:100,energy:0,facing:slot%2===0?1:-1,grounded:true,action:"idle",actionUntil:0,cooldown:0,invuln:0};}
+function view(r){return{code:r.code,mode:r.mode,stage:r.stage,started:r.started,state:r.state,round:r.round,scores:r.scores,players:[...r.players.values()].map(p=>({id:p.id,name:p.name,character:p.character,team:p.team,ready:p.ready}))};}
+function emit(r){io.to(r.code).emit("room:update",view(r));}
+function say(r,type){const ps=[...r.players.values()];const lines=ps.map(p=>{const pool=dialogue[p.character]?.[type]||["Let's fight!"];return{id:p.id,character:p.character,text:pool[Math.floor(Math.random()*pool.length)]};});io.to(r.code).emit("dialogue",{type,lines});}
+function startRound(r){if(r.started||r.matchOver||r.players.size<cap(r.mode)||![...r.players.values()].every(p=>p.ready))return;
+r.round++;r.started=true;r.state="fight";for(const p of r.players.values()){p.hp=100;p.energy=0;p.x=p.team===0?250:710;p.y=0;p.vy=0;p.grounded=true;p.action="idle";p.actionUntil=0;p.cooldown=0;p.invuln=0;p.ready=false;}
+io.to(r.code).emit("fight:start",view(r));say(r,"intro");}
+function endRound(r){const alive=[...r.players.values()].filter(p=>p.hp>0),teams=new Set(alive.map(p=>p.team));if(teams.size>1)return;
+const winner=teams.size?[...teams][0]:null;if(winner!==null)r.scores[winner]=(r.scores[winner]||0)+1;
+r.started=false;const matchOver=winner!==null&&r.scores[winner]>=2||r.round>=3;
+r.matchOver=matchOver;r.state=matchOver?"result":"intermission";
+io.to(r.code).emit("round:over",{round:r.round,winner,scores:r.scores,matchOver,players:[...r.players.values()].map(p=>({id:p.id,hp:p.hp,team:p.team,character:p.character}))});
+if(matchOver)io.to(r.code).emit("fight:over",{winner,scores:r.scores,rounds:r.round});else say(r,"taunt");
+emit(r);
 }
 io.on("connection",s=>{
- s.on("room:create",(opts={},ack=()=>{})=>{
-  const mode=["1v1","2v2","solo"].includes(opts.mode)?opts.mode:"1v1";
-  let code=randCode();while(rooms.has(code))code=randCode();
-  const r=newRoom(code,mode,opts.stage);r.host=s.id;
-  const p=makeFighter(s.id,0,0,opts.char);p.name=String(opts.name||"Player 1").slice(0,18);p.ready=false;r.players.push(p);
-  if(mode==="solo"){const bot=makeFighter("BOT_"+code,1,1,opts.cpuChar||"trump",true);bot.name="CPU";bot.ready=true;r.players.push(bot)}
-  rooms.set(code,r);socketRoom.set(s.id,code);s.join(code);ack({room:pub(r)});send(r);
- });
- s.on("room:join",(o={},ack=()=>{})=>{
-  const r=rooms.get(String(o.code||"").toUpperCase());
-  if(!r)return ack({error:"Room not found."});
-  if(r.mode==="solo"||r.status!=="lobby")return ack({error:"This room is not accepting players."});
-  if(r.players.length>=capacity(r.mode))return ack({error:"Room is full."});
-  if(r.players.some(p=>p.id===s.id))return ack({room:pub(r)});
-  const slot=r.players.length,team=r.mode==="2v2"?slot%2:1;
-  const p=makeFighter(s.id,slot,team,o.char);p.name=String(o.name||`Player ${slot+1}`).slice(0,18);
-  r.players.push(p);socketRoom.set(s.id,r.code);s.join(r.code);ack({room:pub(r)});send(r);
- });
- s.on("player:select",({char,stage}={})=>{
-  const r=getRoom(s);if(!r||r.status!=="lobby")return;
-  const p=r.players.find(x=>x.id===s.id);if(!p)return;
-  if(CHARS[char])p.char=char;if(STAGES.includes(stage))r.stage=stage;send(r);
- });
- s.on("player:ready",()=>{
-  const r=getRoom(s);if(!r||r.status!=="lobby")return;
-  const p=r.players.find(x=>x.id===s.id);if(!p)return;p.ready=!p.ready;
-  if(readyToStart(r))startRound(r);else send(r);
- });
- s.on("input",input=>{
-  const r=getRoom(s);if(!r||r.status!=="playing")return;
-  const p=r.players.find(x=>x.id===s.id);if(!p)return;
-  const safe={};for(const k of ["left","right","jump","crouch","block","punch","kick","grab","super"])safe[k]=!!(input&&input[k]);
-  r.inputs.set(s.id,safe);
- });
- s.on("match:rematch",()=>{
-  const r=getRoom(s);if(!r||r.status!=="finished")return;
-  r.round++;r.players.forEach(p=>p.ready=!!p.bot);
-  if(readyToStart(r))startRound(r);else{r.status="lobby";send(r)}
- });
- s.on("room:leave",()=>leave(s));
- s.on("disconnect",()=>leave(s));
+s.on("room:create",({name,character,mode})=>{mode=mode==="2v2"?"2v2":"1v1";let code;do{code=Math.random().toString(36).slice(2,7).toUpperCase()}while(rooms.has(code));const r={code,mode,stage:"Jantar Mantar",players:new Map(),started:false,state:"lobby",round:0,scores:{0:0,1:0},matchOver:false};rooms.set(code,r);r.players.set(s.id,makePlayer(s.id,name,character,0,mode));s.join(code);s.data.room=code;s.emit("room:joined",view(r));emit(r);});
+s.on("room:join",({code,name,character})=>{const r=rooms.get(clean(code));if(!r)return s.emit("error:game","Room not found. Check the code.");if(r.started||r.matchOver||r.players.size>=cap(r.mode))return s.emit("error:game","This room is full or match has ended.");r.players.set(s.id,makePlayer(s.id,name,character,r.players.size,r.mode));s.join(r.code);s.data.room=r.code;s.emit("room:joined",view(r));emit(r);});
+s.on("player:select",c=>{const r=rooms.get(s.data.room),p=r?.players.get(s.id);if(p&&!r.started&&roster.includes(c)){p.character=c;emit(r);}});
+s.on("stage:select",st=>{const r=rooms.get(s.data.room);if(r&&!r.started&&["Jantar Mantar","Sansad Square","Desi Street"].includes(st)){r.stage=st;emit(r);}});
+s.on("player:ready",()=>{const r=rooms.get(s.data.room),p=r?.players.get(s.id);if(!p||r.matchOver)return;p.ready=!p.ready;emit(r);startRound(r);});
+s.on("input",i=>{const r=rooms.get(s.data.room),p=r?.players.get(s.id);if(!r||!p||!r.started||p.hp<=0)return;const now=Date.now();p.vx=0;if(i.left){p.vx=-250;p.facing=-1;}if(i.right){p.vx=250;p.facing=1;}if(i.jump&&p.grounded){p.vy=-590;p.grounded=false;}if(i.block){p.action="block";p.actionUntil=now+100;}else if(i.attack&&now>p.cooldown){const t=i.attack;p.action=t;p.actionUntil=now+300;p.cooldown=now+(t==="special"?950:420);if(t==="special"&&p.energy<100){p.action="heavy";p.cooldown=now+500;}else{if(t==="special")p.energy=0;else p.energy=Math.min(100,p.energy+12);const foe=[...r.players.values()].find(q=>q.team!==p.team&&q.hp>0&&Math.abs(q.x-p.x)<145&&Math.abs(q.y-p.y)<90);if(foe&&now>foe.invuln){const blocked=foe.action==="block",d=blocked?(t==="special"?7:2):(t==="special"?32:t==="heavy"?17:10);foe.hp=Math.max(0,foe.hp-d);foe.invuln=now+260;foe.action=blocked?"block":"hit";foe.actionUntil=now+280;foe.x+=p.facing*(blocked?4:22);if(t==="special")say(r,"special");}}}else if(now>p.actionUntil&&p.action!=="idle")p.action="idle";p.x=Math.max(65,Math.min(895,p.x+p.vx*.033));});
+s.on("disconnect",()=>{const r=rooms.get(s.data.room);if(!r)return;r.players.delete(s.id);if(!r.players.size)rooms.delete(r.code);else{r.started=false;r.state="lobby";emit(r);}});
 });
-function leave(s){
- const code=socketRoom.get(s.id);if(!code)return;socketRoom.delete(s.id);
- const r=rooms.get(code);if(!r)return;
- r.players=r.players.filter(p=>p.id!==s.id);r.inputs.delete(s.id);
- if(!r.players.length){rooms.delete(code);return}
- r.players.forEach((p,i)=>{p.slot=i;p.ready=!!p.bot;p.team=r.mode==="2v2"?i%2:i});
- r.status="lobby";r.winner=null;if(r.host===s.id)r.host=r.players.find(p=>!p.bot)?.id||null;
- send(r);
-}
-setInterval(()=>{
- const dt=1/30;
- for(const r of rooms.values()){
-  updateRoom(r,dt);
-  if(Date.now()-r.lastBroadcast>50){r.lastBroadcast=Date.now();send(r)}
- }
-},1000/30);
-server.listen(PORT,()=>console.log(`Sansad Showdown listening on ${PORT}`));
+const rooms=new Map();
+setInterval(()=>{const now=Date.now();for(const r of rooms.values()){if(!r.started)continue;for(const p of r.players.values()){if(!p.grounded){p.vy+=1450*.033;p.y+=p.vy*.033;if(p.y>=0){p.y=0;p.vy=0;p.grounded=true;}}if(now>p.actionUntil&&p.action!=="idle"&&p.action!=="hit")p.action="idle";}io.to(r.code).emit("state",[...r.players.values()].map(p=>({id:p.id,x:p.x,y:p.y,hp:p.hp,energy:p.energy,facing:p.facing,action:p.action,team:p.team})));endRound(r);}},33);
+server.listen(PORT,()=>console.log("Sansad Showdown V2 on "+PORT));
